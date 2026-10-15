@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd">
+
+  <!-- Replay: move the history consumer's position for one partition, while the app keeps running. -->
+  <flow name="orders-kafka-seek-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/kafka-seek" allowedMethods="POST" doc:name="POST /kafka-seek"/>
+    <kafka:seek config-ref="Kafka_History_Consumer_config" topic="orders-mule" partition="#[payload.partition]" offset="#[payload.offset]" doc:name="Seek to offset"/>
+    <set-payload value="#[output application/json --- { status: 'seek requested', topic: 'orders-mule', partition: payload.partition, offset: payload.offset }]" doc:name="Seek response"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate error"/>
+    </error-handler>
+  </flow>
+</mule>

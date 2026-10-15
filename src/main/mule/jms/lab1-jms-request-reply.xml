@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <flow name="orders-request-reply-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-request-reply" allowedMethods="POST" doc:name="POST /orders-request-reply"/>
+    <set-variable variableName="requestCorrelationId" value="#[correlationId]" doc:name="Remember request correlation ID"/>
+    <logger level="INFO" message="REQUEST REPLY sending: body=#[payload], requestCorrelationId=#[vars.requestCorrelationId]" doc:name="Log request ticket"/>
+    <jms:publish-consume config-ref="JMS_Config" destination="orders.requests.queue" requestReplyPattern="CORRELATION_ID" doc:name="Publish request and await matching reply">
+      <jms:message correlationId="#[vars.requestCorrelationId]">
+        <jms:body>#[payload]</jms:body>
+        <jms:reply-to destination="orders.replies.queue"/>
+      </jms:message>
+      <jms:consume-configuration maximumWait="5" maximumWaitUnit="SECONDS"/>
+    </jms:publish-consume>
+    <logger level="INFO" message="REQUEST REPLY matched: requestCorrelationId=#[vars.requestCorrelationId], replyCorrelationId=#[attributes.headers.correlationId], replyMessageId=#[attributes.headers.messageId], body=#[payload]" doc:name="Log matched reply"/>
+    <set-payload value="#[output application/json --- { requestCorrelationId: vars.requestCorrelationId, replyCorrelationId: attributes.headers.correlationId, correlationMatches: vars.requestCorrelationId == attributes.headers.correlationId, reply: payload }]" doc:name="Return reply and correlation evidence"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate request or reply error"/>
+    </error-handler>
+  </flow>
+
+  <flow name="orders-request-worker-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.requests.queue" numberOfConsumers="1" ackMode="AUTO" doc:name="Receive order request">
+      <jms:response requestReplyPattern="CORRELATION_ID"/>
+    </jms:listener>
+    <logger level="INFO" message="REQUEST WORKER received: body=#[payload], correlationId=#[attributes.headers.correlationId], replyTo=#[attributes.headers.replyTo]" doc:name="Log request and reply destination"/>
+    <set-payload value="#[output application/json --- { orderId: payload.orderId, amount: payload.amount, status: 'CONFIRMED' }]" doc:name="Build worker reply"/>
+    <logger level="INFO" message="REQUEST WORKER replying: body=#[payload], correlationId=#[attributes.headers.correlationId]" doc:name="Log reply ticket"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate worker error"/>
+    </error-handler>
+  </flow>
+</mule>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd">
+
+  <flow name="orders-kafka-consume-flow">
+    <kafka:message-listener config-ref="Kafka_Consumer_config" ackMode="AUTO" doc:name="Receive order event (AUTO commit)">
+      <redelivery-policy maxRedeliveryCount="3"/>
+    </kafka:message-listener>
+    <logger level="INFO" message="KAFKA received: partition=#[attributes.partition], offset=#[attributes.offset], key=#[attributes.key as String], body=#[payload as String]" doc:name="Log received"/>
+    <choice doc:name="Simulate technical failure">
+      <when expression="#[(read(payload, 'application/json').amount default 0) == -1]">
+        <raise-error type="APP:TECHNICAL" description="Simulated technical failure" doc:name="Raise technical failure"/>
+      </when>
+    </choice>
+    <choice doc:name="Reject non-positive amount">
+      <when expression="#[(read(payload, 'application/json').amount default 0) &lt;= 0]">
+        <raise-error type="APP:INVALID_ORDER" description="Order amount must be greater than zero" doc:name="Raise invalid order"/>
+      </when>
+    </choice>
+    <logger level="INFO" message="KAFKA processed: orderId=#[read(payload, 'application/json').orderId]" doc:name="Log processed"/>
+    <error-handler>
+      <on-error-continue type="APP:INVALID_ORDER" logException="true" doc:name="Handle invalid order (commit and dead-letter)">
+        <kafka:publish config-ref="Kafka_Producer_config" topic="orders-mule-dlq" key="#[attributes.key]" doc:name="Publish to dead-letter topic">
+          <kafka:message>#[payload]</kafka:message>
+          <kafka:headers>#[{'x-error-type': 'APP:INVALID_ORDER', 'x-error-description': error.description, 'x-source-partition': attributes.partition as String, 'x-source-offset': attributes.offset as String}]</kafka:headers>
+        </kafka:publish>
+        <logger level="WARN" message="KAFKA dead-lettered offset=#[attributes.offset] to orders-mule-dlq" doc:name="Log dead-lettered"/>
+      </on-error-continue>
+      <on-error-continue type="MULE:REDELIVERY_EXHAUSTED" logException="true" doc:name="Retries exhausted (commit and dead-letter)">
+        <kafka:publish config-ref="Kafka_Producer_config" topic="orders-mule-dlq" key="#[attributes.key]" doc:name="Publish to dead-letter topic (exhausted)">
+          <kafka:message>#[payload]</kafka:message>
+          <kafka:headers>#[{'x-error-type': 'MULE:REDELIVERY_EXHAUSTED', 'x-source-partition': attributes.partition as String, 'x-source-offset': attributes.offset as String}]</kafka:headers>
+        </kafka:publish>
+        <logger level="WARN" message="KAFKA retries exhausted, dead-lettered to orders-mule-dlq" doc:name="Log exhausted"/>
+      </on-error-continue>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate other errors (no commit, will retry)"/>
+    </error-handler>
+  </flow>
+</mule>

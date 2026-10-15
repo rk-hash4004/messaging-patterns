@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <!-- Lab 1, step 1: publish only. POST /orders puts the order on the ANYCAST queue orders.queue.
+       No consumer yet, so the message should sit in the queue (visible in the Artemis console).
+       AMQ equivalent: Anypoint MQ Publish operation to a queue; no connection factory or session. -->
+  <flow name="orders-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders" allowedMethods="POST" doc:name="POST /orders"/>
+    <logger level="INFO" message="Publishing order to orders.queue, correlationId=#[correlationId]" doc:name="Log publish"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.queue" doc:name="Publish to orders.queue" priority="0">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+        <jms:properties>#[{ source: 'orders-api', orderId: payload.orderId default 'unknown' }]</jms:properties>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'QUEUED', queue: 'orders.queue', correlationId: correlationId, messageId: attributes.messageId default 'n/a' }]" doc:name="Queued response"/>
+  </flow>
+
+  <!-- Lab 1, step 2: same publish but PERSISTENT. Compare with /orders (non-persistent by default in the Mule JMS connector).
+       Test: publish one on each endpoint, restart the Artemis container, see which message survives.
+       AMQ equivalent: nothing to set, Anypoint MQ always stores messages durably. -->
+  <flow name="orders-publish-persistent-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-persistent" allowedMethods="POST" doc:name="POST /orders-persistent"/>
+    <logger level="INFO" message="Publishing PERSISTENT order to orders.queue, correlationId=#[correlationId]" doc:name="Log publish"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.queue" persistentDelivery="true" doc:name="Publish persistent to orders.queue">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+        <jms:properties>#[{ source: 'orders-api-persistent', orderId: payload.orderId default 'unknown' }]</jms:properties>
+        <!-- Derive the message group from the business order identity. -->
+        <jms:jmsx-properties jmsxGroupID="#[payload.orderId]"/>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'QUEUED', persistent: true, queue: 'orders.queue', groupId: payload.orderId, correlationId: correlationId }]" doc:name="Queued response"/>
+  </flow>
+</mule>

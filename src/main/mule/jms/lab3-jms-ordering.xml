@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <flow name="orders-seq-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-seq" allowedMethods="POST" doc:name="POST /orders-seq"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.seq.queue" persistentDelivery="true" doc:name="Publish to orders.seq.queue">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+        <jms:jmsx-properties jmsxGroupID="#[payload.orderId]"/>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'queued', seq: payload.seq }]" doc:name="Queued response"/>
+  </flow>
+
+  <flow name="orders-seq-consume-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.seq.queue" numberOfConsumers="3" ackMode="AUTO" doc:name="Receive sequenced order"/>
+    <logger level="INFO" message="SEQ received: seq=#[payload.seq], deliveryCount=#[attributes.properties.jmsxProperties.jmsxDeliveryCount default 'unset'], redelivered=#[attributes.headers.redelivered]" doc:name="Log received"/>
+    <choice doc:name="Fail seq 3 on first delivery only">
+      <when expression="#[payload.seq == 3 and ((attributes.properties.jmsxProperties.jmsxDeliveryCount default 1) as Number) == 1]">
+        <raise-error type="APP:TRANSIENT" description="Simulated one-time failure on seq 3" doc:name="Simulate transient failure"/>
+      </when>
+    </choice>
+    <logger level="INFO" message="SEQ finished: seq=#[payload.seq]" doc:name="Log finished"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate error for redelivery"/>
+    </error-handler>
+  </flow>
+</mule>

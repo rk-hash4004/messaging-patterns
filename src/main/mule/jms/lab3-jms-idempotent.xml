@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <flow name="orders-idem-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-idem" allowedMethods="POST" doc:name="POST /orders-idem"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.idem.queue" persistentDelivery="true" doc:name="Publish to orders.idem.queue">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'queued', orderId: payload.orderId }]" doc:name="Queued response"/>
+  </flow>
+
+  <flow name="orders-idem-consume-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.idem.queue" numberOfConsumers="1" ackMode="AUTO" doc:name="Receive idempotent order"/>
+    <logger level="INFO" message="IDEM received: orderId=#[payload.orderId], messageId=#[attributes.headers.messageId]" doc:name="Log received"/>
+    <idempotent-message-validator idExpression="#[payload.orderId]" doc:name="Reject already-seen orderId"/>
+    <logger level="INFO" message="IDEM processed: orderId=#[payload.orderId]" doc:name="Log processed once"/>
+    <error-handler>
+      <on-error-continue type="MULE:DUPLICATE_MESSAGE" logException="true" doc:name="Skip duplicate">
+        <logger level="WARN" message="IDEM duplicate skipped: orderId=#[payload.orderId]" doc:name="Log duplicate skipped"/>
+      </on-error-continue>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate other errors"/>
+    </error-handler>
+  </flow>
+</mule>

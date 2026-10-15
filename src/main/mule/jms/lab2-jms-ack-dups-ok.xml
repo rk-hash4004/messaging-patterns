@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <flow name="orders-ack-dups-ok-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-ack-dups-ok" allowedMethods="POST" doc:name="POST /orders-ack-dups-ok"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.ack.dups-ok.queue" persistentDelivery="true" doc:name="Publish order for ACK lab">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'QUEUED', queue: 'orders.ack.dups-ok.queue', correlationId: correlationId }]" doc:name="Queued response"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate publish error"/>
+    </error-handler>
+  </flow>
+
+  <!-- Consumer-side validation deliberately demonstrates business failure after publication.
+       DUPS_OK acknowledges lazily after success; duplicates are possible.
+       AMQ equivalent: AUTO is the closest success-based mode; no DUPS_OK option. -->
+  <flow name="orders-ack-dups-ok-consume-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.ack.dups-ok.queue" ackMode="DUPS_OK" numberOfConsumers="1" doc:name="Listen with DUPS_OK acknowledgement"/>
+    <logger level="INFO" message="ACK DUPS_OK received: body=#[payload], messageId=#[attributes.headers.messageId], redelivered=#[attributes.headers.redelivered], deliveryCount=#[attributes.properties.jmsxProperties.jmsxDeliveryCount default 'unset']" doc:name="Log delivery attempt"/>
+    <choice doc:name="Validate order amount">
+      <when expression="#[(payload.amount default 0) &lt;= 0]">
+        <raise-error type="APP:INVALID_ORDER" description="Order amount must be greater than zero" doc:name="Reject invalid order"/>
+      </when>
+      <otherwise>
+        <logger level="INFO" message="ACK DUPS_OK processed: orderId=#[payload.orderId], amount=#[payload.amount]" doc:name="Log successful processing"/>
+      </otherwise>
+    </choice>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate processing error">
+        <logger level="ERROR" message="ACK DUPS_OK failed: orderId=#[payload.orderId default 'unknown'], errorType=#[error.errorType], description=#[error.description]" doc:name="Log propagated failure"/>
+      </on-error-propagate>
+    </error-handler>
+  </flow>
+</mule>

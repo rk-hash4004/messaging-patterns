@@ -1,0 +1,31 @@
+# Local brokers for the messaging lab. Start only what the current phase needs.
+services:
+  artemis:
+    image: apache/activemq-artemis:latest-alpine
+    container_name: lab-artemis
+    ports:
+      - "61616:61616"   # broker (JMS clients connect here)
+      - "8161:8161"     # web console: http://localhost:8161  (artemis / artemis)
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis
+    volumes:
+      - ./broker-data/artemis:/var/lib/artemis-instance
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: lab-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      # Single-node KRaft mode, no Zookeeper. Local lab only.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "messaging-local-cluster"

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd">
+
+  <!-- History reader: new group + EARLIEST, so it reads everything already in the topic. Only logs. -->
+  <flow name="orders-kafka-history-flow">
+    <kafka:message-listener config-ref="Kafka_History_Consumer_config" ackMode="AUTO" doc:name="Read history (EARLIEST)"/>
+    <logger level="INFO" message="HISTORY received: partition=#[attributes.partition], offset=#[attributes.offset], key=#[attributes.key as String]" doc:name="Log history record"/>
+  </flow>
+</mule>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+  <Appenders>
+    <Console name="console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%-5p %d [%t] [processor: %X{processorPath}; event: %X{correlationId}] %c: %m%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <!-- Default Mule Logger component category (all earlier demo loggers) -->
+    <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+    <!-- Our own categories: setting app.orders also covers app.orders.errors -->
+    <AsyncLogger name="app.orders" level="INFO"/>
+    <!-- Mule's default error report -->
+    <AsyncLogger name="org.mule.runtime.core.privileged.exception" level="ERROR"/>
+    <AsyncRoot level="WARN">
+      <AppenderRef ref="console"/>
+    </AsyncRoot>
+  </Loggers>
+</Configuration>

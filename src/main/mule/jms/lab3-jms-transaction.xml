@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <flow name="orders-tx-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-tx" allowedMethods="POST" doc:name="POST /orders-tx"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.tx.in" persistentDelivery="true" doc:name="Publish to orders.tx.in">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'queued', orderId: payload.orderId }]" doc:name="Queued response"/>
+  </flow>
+
+  <flow name="orders-tx-process-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.tx.in" numberOfConsumers="1" ackMode="AUTO" transactionalAction="ALWAYS_BEGIN" doc:name="Receive order (begin transaction)"/>
+    <logger level="INFO" message="TX received: orderId=#[payload.orderId], failAfterPublish=#[payload.failAfterPublish default false], deliveryCount=#[attributes.properties.jmsxProperties.jmsxDeliveryCount default 'unset']" doc:name="Log received"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.tx.out" persistentDelivery="true" transactionalAction="ALWAYS_JOIN" doc:name="Publish result (join transaction)">
+      <jms:message>
+        <jms:body>#[output application/json --- { orderId: payload.orderId, status: 'PROCESSED' }]</jms:body>
+      </jms:message>
+    </jms:publish>
+    <logger level="INFO" message="TX published result to orders.tx.out: orderId=#[payload.orderId]" doc:name="Log published"/>
+    <choice doc:name="Fail after publish on first delivery only">
+      <when expression="#[(payload.failAfterPublish default false) and ((attributes.properties.jmsxProperties.jmsxDeliveryCount default 1) as Number) == 1]">
+        <raise-error type="APP:AFTER_PUBLISH" description="Simulated failure after publish" doc:name="Simulate failure after publish"/>
+      </when>
+    </choice>
+    <logger level="INFO" message="TX committed: orderId=#[payload.orderId]" doc:name="Log committed"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate error (rollback)"/>
+    </error-handler>
+  </flow>
+
+  <flow name="orders-tx-out-consume-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.tx.out" numberOfConsumers="1" ackMode="AUTO" doc:name="Receive result"/>
+    <logger level="INFO" message="TX OUT received: #[payload]" doc:name="Log result received"/>
+  </flow>
+</mule>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd">
+
+  <flow name="orders-manual-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/orders-kafka-manual" allowedMethods="POST" doc:name="POST /orders-kafka-manual"/>
+    <set-variable variableName="orderId" value="#[payload.orderId]" doc:name="Remember orderId"/>
+    <kafka:publish config-ref="Kafka_Producer_config" topic="orders-manual" key="#[vars.orderId]" doc:name="Publish to orders-manual">
+      <kafka:message>#[output application/json --- payload]</kafka:message>
+    </kafka:publish>
+    <set-payload value="#[output application/json --- { status: 'published', orderId: vars.orderId }]" doc:name="Published response"/>
+  </flow>
+
+  <flow name="orders-manual-consume-flow">
+    <kafka:message-listener config-ref="Kafka_Manual_Consumer_config" ackMode="MANUAL" doc:name="Receive order event (MANUAL commit)">
+      <redelivery-policy maxRedeliveryCount="3"/>
+    </kafka:message-listener>
+    <logger level="INFO" message="MANUAL received: partition=#[attributes.partition], offset=#[attributes.offset], key=#[attributes.key as String]" doc:name="Log received"/>
+    <choice doc:name="Fail before commit if amount is -1">
+      <when expression="#[(read(payload, 'application/json').amount default 0) == -1]">
+        <raise-error type="APP:TECHNICAL" description="Simulated failure before commit" doc:name="Raise failure before commit"/>
+      </when>
+    </choice>
+    <logger level="INFO" message="MANUAL processed (work done), committing now" doc:name="Log work done"/>
+    <kafka:commit config-ref="Kafka_Manual_Consumer_config" commitKey="#[attributes.consumerCommitKey]" doc:name="Commit offset"/>
+    <logger level="INFO" message="MANUAL committed" doc:name="Log committed"/>
+    <error-handler>
+      <on-error-continue type="MULE:REDELIVERY_EXHAUSTED" logException="true" doc:name="Retries exhausted (dead-letter, then commit)">
+        <!-- Save before kafka:publish: publish replaces attributes. -->
+        <set-variable variableName="commitKey" value="#[attributes.consumerCommitKey]" doc:name="Save commit key"/>
+        <set-variable variableName="srcPartition" value="#[attributes.partition as String]" doc:name="Save partition"/>
+        <set-variable variableName="srcOffset" value="#[attributes.offset as String]" doc:name="Save offset"/>
+        <kafka:publish config-ref="Kafka_Producer_config" topic="orders-mule-dlq" key="#[attributes.key]" doc:name="Publish to dead-letter topic">
+          <kafka:message>#[payload]</kafka:message>
+          <kafka:headers>#[{'x-error-type': 'MULE:REDELIVERY_EXHAUSTED', 'x-source-topic': 'orders-manual', 'x-source-partition': vars.srcPartition, 'x-source-offset': vars.srcOffset}]</kafka:headers>
+        </kafka:publish>
+        <kafka:commit config-ref="Kafka_Manual_Consumer_config" commitKey="#[vars.commitKey]" doc:name="Commit after dead-letter"/>
+        <logger level="WARN" message="MANUAL retries exhausted: dead-lettered and committed" doc:name="Log dead-lettered and committed"/>
+      </on-error-continue>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate (no commit)"/>
+    </error-handler>
+  </flow>
+</mule>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <!-- Billing is non-durable; Analytics retains events while offline after registration.
+       AMQ equivalent: exchange -> billing queue + analytics queue. -->
+  <flow name="order-events-publish-flow">
+    <http:listener config-ref="HTTP_Listener_config" path="/order-events" allowedMethods="POST" doc:name="POST /order-events"/>
+    <jms:publish config-ref="JMS_Config" destination="orders.events" destinationType="TOPIC" persistentDelivery="true" doc:name="Publish to orders.events topic">
+      <jms:message correlationId="#[correlationId]">
+        <jms:body>#[payload]</jms:body>
+        <jms:properties>#[{ source: 'orders-api-events', orderId: payload.orderId default 'unknown' }]</jms:properties>
+      </jms:message>
+    </jms:publish>
+    <set-payload value="#[output application/json --- { status: 'PUBLISHED', topic: 'orders.events', correlationId: correlationId }]" doc:name="Published response"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate publish error"/>
+    </error-handler>
+  </flow>
+
+  <flow name="billing-events-subscribe-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.events" numberOfConsumers="1" doc:name="Billing topic subscription">
+      <jms:consumer-type>
+        <jms:topic-consumer durable="false" shared="false" noLocal="false"/>
+      </jms:consumer-type>
+    </jms:listener>
+    <logger level="INFO" message="BILLING received: body=#[payload], correlationId=#[attributes.headers.correlationId], messageId=#[attributes.headers.messageId]" doc:name="Log Billing event"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate Billing error"/>
+    </error-handler>
+  </flow>
+
+  <!-- Durable offline recovery verified. Temporarily commenting out this flow lets the
+       publisher run without Analytics; restore it to consume the retained backlog. -->
+  <flow name="analytics-events-subscribe-flow" initialState="started">
+    <jms:listener config-ref="JMS_Analytics_Config" destination="orders.events" numberOfConsumers="1" doc:name="Analytics durable topic subscription">
+      <jms:consumer-type>
+        <jms:topic-consumer durable="true" subscriptionName="analytics-orders-sub" shared="false" noLocal="false"/>
+      </jms:consumer-type>
+    </jms:listener>
+    <logger level="INFO" message="ANALYTICS received: body=#[payload], correlationId=#[attributes.headers.correlationId], messageId=#[attributes.headers.messageId]" doc:name="Log Analytics event"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="Propagate Analytics error"/>
+    </error-handler>
+  </flow>
+</mule>

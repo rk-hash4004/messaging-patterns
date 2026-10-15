@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+  <!-- Lab 1, step 3: JMS Listener (consumer). Every message on orders.queue starts one run of this flow.
+       numberOfConsumers was 1 for the first test (connector default is 4); now 3 for the competing-consumers test.
+       ackMode left at its default (AUTO); acknowledgement modes are covered in the lab2 files.
+       AMQ equivalent: Anypoint MQ Subscribe source (ack AUTO or MANUAL with ACK/NACK; no selector, no session). -->
+  <flow name="orders-consume-flow">
+    <jms:listener config-ref="JMS_Config" destination="orders.queue" numberOfConsumers="3" doc:name="Listen on orders.queue"/>
+    <logger level="INFO" message="Consumed order: body=#[payload], groupId=#[attributes.properties.jmsxProperties.jmsxGroupID default 'unset'], correlationId=#[attributes.headers.correlationId], messageId=#[attributes.headers.messageId], properties=#[attributes.properties.userProperties]" doc:name="Log consumed message"/>
+    <!-- Competing-consumers test: simulate 2 s of work so messages overlap and the 3 consumers show up in the logs. -->
+    <set-variable variableName="work" value="#[%dw 2.0 import wait from dw::Runtime --- wait(1, 2000)]" doc:name="Simulate 2s work"/>
+    <logger level="INFO" message="Finished order: body=#[payload], groupId=#[attributes.properties.jmsxProperties.jmsxGroupID default 'unset']" doc:name="Log finished"/>
+    <error-handler>
+      <on-error-propagate type="ANY" logException="true" doc:name="On Error Propagate"/>
+    </error-handler>
+  </flow>
+</mule>

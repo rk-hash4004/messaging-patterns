@@ -1,0 +1,68 @@
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:kafka="http://www.mulesoft.org/schema/mule/kafka" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd   http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd   http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd   http://www.mulesoft.org/schema/mule/kafka http://www.mulesoft.org/schema/mule/kafka/current/mule-kafka.xsd">
+    <!-- Port 8082 so this lab can run beside the others that use 8081 (JMS/Kafka consumers need their own app anyway) -->
+    <http:listener-config doc:name="HTTP Listener config" name="HTTP_Listener_config">
+        <http:listener-connection host="0.0.0.0" port="8082"></http:listener-connection>
+    </http:listener-config>
+    <!-- Artemis speaks OpenWire on 61616, so the connector's ActiveMQ connection works with it.
+	     AMQ difference: Anypoint MQ has no connection factory; it uses a region URL plus client ID/secret. -->
+    <jms:config doc:name="JMS Config" name="JMS_Config">
+        <jms:active-mq-connection password="artemis" username="artemis">
+            <!-- Client policy: initial delivery plus 3 retries, with 1-second delays. -->
+            <jms:factory-configuration brokerUrl="tcp://localhost:61616" initialRedeliveryDelay="1000" maxRedelivery="3" redeliveryDelay="1000"></jms:factory-configuration>
+        </jms:active-mq-connection>
+    </jms:config>
+    <!-- Stable connection identity for Analytics' unshared durable subscription. -->
+    <jms:config doc:name="Analytics durable JMS Config" name="JMS_Analytics_Config">
+        <jms:active-mq-connection clientId="messaging-lab-analytics" password="artemis" username="artemis">
+            <jms:factory-configuration brokerUrl="tcp://localhost:61616"></jms:factory-configuration>
+        </jms:active-mq-connection>
+    </jms:config>
+    <!-- Kafka: local broker from docker-compose.yml. Plaintext = no TLS/login (local lab only). -->
+    <kafka:producer-config doc:name="Kafka Producer config" name="Kafka_Producer_config">
+        <kafka:producer-plaintext-connection>
+            <kafka:bootstrap-servers>
+                <kafka:bootstrap-server value="localhost:9092"></kafka:bootstrap-server>
+            </kafka:bootstrap-servers>
+        </kafka:producer-plaintext-connection>
+    </kafka:producer-config>
+    <kafka:consumer-config doc:name="Kafka Consumer config" name="Kafka_Consumer_config">
+        <kafka:consumer-plaintext-connection groupId="mule-lab-group">
+            <kafka:bootstrap-servers>
+                <kafka:bootstrap-server value="localhost:9092"></kafka:bootstrap-server>
+            </kafka:bootstrap-servers>
+            <kafka:topic-patterns>
+                <kafka:topic-pattern value="orders-mule"></kafka:topic-pattern>
+            </kafka:topic-patterns>
+        </kafka:consumer-plaintext-connection>
+    </kafka:consumer-config>
+    <kafka:consumer-config doc:name="Kafka Manual Consumer config" name="Kafka_Manual_Consumer_config">
+        <kafka:consumer-plaintext-connection groupId="mule-manual-group">
+            <kafka:bootstrap-servers>
+                <kafka:bootstrap-server value="localhost:9092"></kafka:bootstrap-server>
+            </kafka:bootstrap-servers>
+            <kafka:topic-patterns>
+                <kafka:topic-pattern value="orders-manual"></kafka:topic-pattern>
+            </kafka:topic-patterns>
+        </kafka:consumer-plaintext-connection>
+    </kafka:consumer-config>
+    <kafka:consumer-config doc:name="Kafka History Consumer config" name="Kafka_History_Consumer_config">
+        <kafka:consumer-plaintext-connection autoOffsetReset="EARLIEST" groupId="mule-history-group">
+            <kafka:bootstrap-servers>
+                <kafka:bootstrap-server value="localhost:9092"></kafka:bootstrap-server>
+            </kafka:bootstrap-servers>
+            <kafka:topic-patterns>
+                <kafka:topic-pattern value="orders-mule"></kafka:topic-pattern>
+            </kafka:topic-patterns>
+        </kafka:consumer-plaintext-connection>
+    </kafka:consumer-config>
+    <kafka:consumer-config doc:name="Kafka Immediate Consumer config" name="Kafka_Immediate_Consumer_config">
+        <kafka:consumer-plaintext-connection groupId="mule-immediate-group">
+            <kafka:bootstrap-servers>
+                <kafka:bootstrap-server value="localhost:9092"></kafka:bootstrap-server>
+            </kafka:bootstrap-servers>
+            <kafka:topic-patterns>
+                <kafka:topic-pattern value="orders-immediate"></kafka:topic-pattern>
+            </kafka:topic-patterns>
+        </kafka:consumer-plaintext-connection>
+    </kafka:consumer-config>
+</mule>
